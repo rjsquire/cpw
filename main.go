@@ -92,6 +92,8 @@ func main() {
 		lockStore()
 	case "status":
 		showStatus()
+	case "change-password":
+		changeMasterPassword()
 	default:
 		printUsage()
 	}
@@ -108,6 +110,7 @@ func printUsage() {
 	fmt.Println("  cpw unlock               - Unlock the password store")
 	fmt.Println("  cpw lock                 - Lock the password store")
 	fmt.Println("  cpw status               - Show lock status")
+	fmt.Println("  cpw change-password      - Change the master password")
 }
 
 func getDataFilePath() string {
@@ -601,4 +604,160 @@ func showStatus() {
 	} else {
 		fmt.Println("Password store status: LOCKED")
 	}
+}
+
+func changeMasterPassword() {
+	// Always require the current master password, even if unlocked
+	fmt.Print("Enter current master password: ")
+	currentPassword, err := term.ReadPassword(int(syscall.Stdin))
+	fmt.Println()
+	if err != nil {
+		fmt.Printf("Error reading current master password: %v\n", err)
+		return
+	}
+
+	// Load the store with the current master password to verify it's correct
+	store, err := loadPasswordStoreWithMasterPassword(currentPassword)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		return
+	}
+
+	if len(store.Entries) == 0 {
+		fmt.Println("No passwords stored. You can change the master password when you add your first password.")
+		return
+	}
+
+	// Get the new master password
+	fmt.Print("Enter new master password: ")
+	newPassword, err := term.ReadPassword(int(syscall.Stdin))
+	fmt.Println()
+	if err != nil {
+		fmt.Printf("Error reading new master password: %v\n", err)
+		return
+	}
+
+	fmt.Print("Confirm new master password: ")
+	confirmPassword, err := term.ReadPassword(int(syscall.Stdin))
+	fmt.Println()
+	if err != nil {
+		fmt.Printf("Error reading confirmation password: %v\n", err)
+		return
+	}
+
+	// Verify passwords match
+	if string(newPassword) != string(confirmPassword) {
+		fmt.Println("Error: Passwords do not match")
+		return
+	}
+
+	if len(newPassword) == 0 {
+		fmt.Println("Error: New password cannot be empty")
+		return
+	}
+
+	fmt.Printf("Changing master password and re-encrypting %d stored passwords...\n", len(store.Entries))
+
+	// Generate new salt for the new master password
+	newSalt := make([]byte, 32)
+	if _, err := io.ReadFull(rand.Reader, newSalt); err != nil {
+		fmt.Printf("Error generating new salt: %v\n", err)
+		return
+	}
+
+	// Derive keys
+	currentKey := deriveKey(currentPassword, store.Salt)
+	newKey := deriveKey(newPassword, newSalt)
+
+	// Re-encrypt all passwords with progress indication
+	totalEntries := len(store.Entries)
+	for i := range store.Entries {
+		if totalEntries > 1 {
+			fmt.Printf("Re-encrypting password %d of %d...\n", i+1, totalEntries)
+		}
+		// Decrypt with old key
+		encryptedData, err := base64.StdEncoding.DecodeString(store.Entries[i].Password)
+		if err != nil {
+			fmt.Printf("Error decoding password data for entry %d: %v\n", store.Entries[i].ID, err)
+			return
+		}
+
+		plaintext, err := decrypt(encryptedData, currentKey)
+		if err != nil {
+			fmt.Printf("Error decrypting password for entry %d: %v\n", store.Entries[i].ID, err)
+			return
+		}
+
+		// Re-encrypt with new key
+		newEncryptedData, err := encrypt(plaintext, newKey)
+		if err != nil {
+			fmt.Printf("Error re-encrypting password for entry %d: %v\n", store.Entries[i].ID, err)
+			return
+		}
+
+		// Update the entry
+		store.Entries[i].Password = base64.StdEncoding.EncodeToString(newEncryptedData)
+	}
+
+	// Update the salt
+	store.Salt = newSalt
+
+	// Save the updated store
+	if err := savePasswordStore(store); err != nil {
+		fmt.Printf("Error saving updated password store: %v\n", err)
+		return
+	}
+
+	// If the store was unlocked, we need to update the session key or lock it
+	if isUnlocked() {
+		fmt.Println("Store was unlocked. Locking store for security...")
+		lockStore()
+	}
+
+	fmt.Printf("Master password changed successfully. All %d passwords have been re-encrypted.\n", len(store.Entries))
+	fmt.Println("Please use your new master password for future operations.")
+}
+
+// loadPasswordStoreWithMasterPassword always uses the actual master password, ignoring unlock state
+func loadPasswordStoreWithMasterPassword(masterPassword []byte) (*PasswordStore, error) {
+	filePath := getDataFilePath()
+
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		// Create new store with random salt
+		salt := make([]byte, 32)
+		if _, err := io.ReadFull(rand.Reader, salt); err != nil {
+			return nil, err
+		}
+		return &PasswordStore{
+			Entries: []PasswordEntry{},
+			Salt:    salt,
+		}, nil
+	}
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, err
+	}
+
+	var store PasswordStore
+	if err := json.Unmarshal(data, &store); err != nil {
+		return nil, err
+	}
+
+	// Always derive key from master password and salt (ignore unlock state)
+	key := deriveKey(masterPassword, store.Salt)
+
+	// Verify master password by trying to decrypt the first entry
+	if len(store.Entries) > 0 {
+		encryptedData, err := base64.StdEncoding.DecodeString(store.Entries[0].Password)
+		if err != nil {
+			return nil, fmt.Errorf("corrupted password data")
+		}
+		_, err = decrypt(encryptedData, key)
+		if err != nil {
+			return nil, fmt.Errorf("invalid master password")
+		}
+	}
+
+	return &store, nil
 }
