@@ -38,6 +38,13 @@ cpw get
 cpw get 1
 ```
 
+### Update a Password
+```bash
+# Update an existing password by ID
+cpw update 1
+# You'll be prompted for the new password
+```
+
 ### List All Passwords
 ```bash
 cpw list
@@ -109,6 +116,7 @@ cpw unlock
 cpw list
 cpw get 1
 cpw add "Another Account"
+cpw update 2  # Update Work Email password
 
 # Lock when done for security
 cpw lock
