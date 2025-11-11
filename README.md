@@ -62,6 +62,16 @@ cpw status
 cpw lock
 ```
 
+### Change Master Password
+```bash
+# Change the master password (requires current password even if unlocked)
+cpw change-password
+# You'll be prompted for:
+# 1. Current master password
+# 2. New master password  
+# 3. Confirmation of new password
+```
+
 ## How It Works
 
 1. **Master Password**: You set a master password that protects all your stored passwords
@@ -102,6 +112,14 @@ cpw add "Another Account"
 
 # Lock when done for security
 cpw lock
+
+# Change master password if needed
+cpw change-password
+# Enter current master password: [hidden]
+# Enter new master password: [hidden]  
+# Confirm new master password: [hidden]
+# Changing master password and re-encrypting all stored passwords...
+# Master password changed successfully. All X passwords have been re-encrypted.
 ```
 
 ## Lock/Unlock Feature
@@ -110,6 +128,14 @@ cpw lock
 - **Unlocked State**: Master password entered once, then cached for subsequent operations
 - **Security Warning**: When unlocked, all commands show a warning reminder to lock the store
 - **Session Management**: Unlock state is maintained until you run `cpw lock` or restart your system
+
+## Change Master Password
+
+- **Security First**: Always requires current master password, even when store is unlocked
+- **Re-encryption**: All stored passwords are automatically re-encrypted with the new master password
+- **New Salt**: A new cryptographic salt is generated for enhanced security
+- **Auto-lock**: Store is automatically locked after password change for security
+- **Confirmation**: Requires confirmation of new password to prevent typos
 
 ## Security Notes
 
