@@ -50,12 +50,25 @@ cpw delete 1
 # Deletes the password with ID 1 (with confirmation prompt)
 ```
 
+### Lock and Unlock Store
+```bash
+# Unlock the password store (requires master password)
+cpw unlock
+
+# Check lock status
+cpw status
+
+# Lock the password store (no password required)
+cpw lock
+```
+
 ## How It Works
 
 1. **Master Password**: You set a master password that protects all your stored passwords
 2. **Encryption**: Each password is encrypted using AES-256-GCM with a key derived from your master password using PBKDF2
 3. **Storage**: Encrypted passwords are stored in `~/.cpw/passwords.dat`
-4. **Retrieval**: When you retrieve a password, it's decrypted and copied to your clipboard automatically
+4. **Lock/Unlock**: You can unlock the store to avoid entering your master password repeatedly
+5. **Retrieval**: When you retrieve a password, it's decrypted and copied to your clipboard automatically
 
 ## Security Features
 
@@ -73,30 +86,40 @@ cpw delete 1
 ## Example Workflow
 
 ```bash
-# Add some passwords
+# Add some passwords (requires master password each time when locked)
 cpw add "GitHub"
-cpw add "Work Email"
+cpw add "Work Email" 
 cpw add "Bank Account"
 
-# List all passwords
+# For frequent use, unlock the store
+cpw unlock
+# Enter master password once
+
+# Now use commands without entering master password
 cpw list
+cpw get 1
+cpw add "Another Account"
 
-# Get the most recent password (Bank Account)
-cpw get
-
-# Get a specific password by ID
-cpw get 1  # Gets GitHub password
-
-# Delete a password
-cpw delete 2  # Deletes Work Email password
+# Lock when done for security
+cpw lock
 ```
+
+## Lock/Unlock Feature
+
+- **Locked State** (default): Requires master password for every operation
+- **Unlocked State**: Master password entered once, then cached for subsequent operations
+- **Security Warning**: When unlocked, all commands show a warning reminder to lock the store
+- **Session Management**: Unlock state is maintained until you run `cpw lock` or restart your system
 
 ## Security Notes
 
 - Choose a strong master password - it protects all your other passwords
+- **Always lock the store** when finished - unlocked stores are a security risk
 - The clipboard is cleared automatically after copying (OS dependent)
 - Never share your `passwords.dat` file or master password
 - Regular backups of `passwords.dat` are recommended (the file is encrypted)
+- Session files (`.unlocked`, `.session_key`) are automatically cleaned up when locking
+- Unlock state does not persist across system restarts
 
 ## Dependencies
 

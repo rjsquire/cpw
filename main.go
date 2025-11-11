@@ -35,10 +35,13 @@ type PasswordStore struct {
 }
 
 const (
-	dataFile   = "passwords.dat"
-	keySize    = 32     // AES-256
-	nonceSize  = 12     // GCM nonce size
-	iterations = 100000 // PBKDF2 iterations
+	dataFile       = "passwords.dat"
+	lockFile       = ".unlocked"
+	keyFile        = ".session_key"
+	keySize        = 32     // AES-256
+	nonceSize      = 12     // GCM nonce size
+	iterations     = 100000 // PBKDF2 iterations
+	sessionKeySize = 32     // Session key size
 )
 
 func main() {
@@ -83,6 +86,12 @@ func main() {
 			return
 		}
 		deletePassword(index)
+	case "unlock":
+		unlockStore()
+	case "lock":
+		lockStore()
+	case "status":
+		showStatus()
 	default:
 		printUsage()
 	}
@@ -96,6 +105,9 @@ func printUsage() {
 	fmt.Println("  cpw get [index]          - Get password (most recent if no index)")
 	fmt.Println("  cpw list                 - List all passwords")
 	fmt.Println("  cpw delete <index>       - Delete a password")
+	fmt.Println("  cpw unlock               - Unlock the password store")
+	fmt.Println("  cpw lock                 - Lock the password store")
+	fmt.Println("  cpw status               - Show lock status")
 }
 
 func getDataFilePath() string {
@@ -113,6 +125,54 @@ func ensureDataDir() error {
 	}
 	dir := filepath.Join(home, ".cpw")
 	return os.MkdirAll(dir, 0700)
+}
+
+func getLockFilePath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return lockFile
+	}
+	return filepath.Join(home, ".cpw", lockFile)
+}
+
+func getKeyFilePath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return keyFile
+	}
+	return filepath.Join(home, ".cpw", keyFile)
+}
+
+func isUnlocked() bool {
+	lockPath := getLockFilePath()
+	keyPath := getKeyFilePath()
+
+	// Both lock file and key file must exist
+	if _, err := os.Stat(lockPath); os.IsNotExist(err) {
+		return false
+	}
+	if _, err := os.Stat(keyPath); os.IsNotExist(err) {
+		return false
+	}
+	return true
+}
+
+func printSecurityWarning() {
+	fmt.Println("\033[33m⚠️  WARNING: Password store is UNLOCKED - remember to run 'cpw lock' when done!\033[0m")
+}
+
+func getMasterPasswordIfNeeded() ([]byte, error) {
+	if isUnlocked() {
+		printSecurityWarning()
+		// Load session key from file
+		keyPath := getKeyFilePath()
+		sessionKey, err := os.ReadFile(keyPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read session key: %v", err)
+		}
+		return sessionKey, nil
+	}
+	return getMasterPassword()
 }
 
 func getMasterPassword() ([]byte, error) {
@@ -200,16 +260,30 @@ func loadPasswordStore(masterPassword []byte) (*PasswordStore, error) {
 		return nil, err
 	}
 
-	// Verify master password by trying to decrypt the first entry
+	// If unlocked, masterPassword is actually the session key
+	// If locked, masterPassword needs to be derived with salt
+	var key []byte
+	if isUnlocked() {
+		// masterPassword is already the derived session key
+		key = masterPassword
+	} else {
+		// Derive key from master password and salt
+		key = deriveKey(masterPassword, store.Salt)
+	}
+
+	// Verify password/session by trying to decrypt the first entry
 	if len(store.Entries) > 0 {
-		key := deriveKey(masterPassword, store.Salt)
 		encryptedData, err := base64.StdEncoding.DecodeString(store.Entries[0].Password)
 		if err != nil {
 			return nil, fmt.Errorf("corrupted password data")
 		}
 		_, err = decrypt(encryptedData, key)
 		if err != nil {
-			return nil, fmt.Errorf("invalid master password")
+			if isUnlocked() {
+				return nil, fmt.Errorf("invalid session key")
+			} else {
+				return nil, fmt.Errorf("invalid master password")
+			}
 		}
 	}
 
@@ -231,7 +305,7 @@ func savePasswordStore(store *PasswordStore) error {
 }
 
 func addPassword(description string) {
-	masterPassword, err := getMasterPassword()
+	masterPassword, err := getMasterPasswordIfNeeded()
 	if err != nil {
 		fmt.Printf("Error reading master password: %v\n", err)
 		return
@@ -251,7 +325,12 @@ func addPassword(description string) {
 		return
 	}
 
-	key := deriveKey(masterPassword, store.Salt)
+	var key []byte
+	if isUnlocked() {
+		key = masterPassword // masterPassword is already the session key
+	} else {
+		key = deriveKey(masterPassword, store.Salt)
+	}
 	encryptedPassword, err := encrypt(string(password), key)
 	if err != nil {
 		fmt.Printf("Error encrypting password: %v\n", err)
@@ -284,7 +363,7 @@ func addPassword(description string) {
 }
 
 func getPassword(index int) {
-	masterPassword, err := getMasterPassword()
+	masterPassword, err := getMasterPasswordIfNeeded()
 	if err != nil {
 		fmt.Printf("Error reading master password: %v\n", err)
 		return
@@ -321,7 +400,12 @@ func getPassword(index int) {
 		}
 	}
 
-	key := deriveKey(masterPassword, store.Salt)
+	var key []byte
+	if isUnlocked() {
+		key = masterPassword // masterPassword is already the session key
+	} else {
+		key = deriveKey(masterPassword, store.Salt)
+	}
 	encryptedData, err := base64.StdEncoding.DecodeString(entry.Password)
 	if err != nil {
 		fmt.Printf("Error decoding password data: %v\n", err)
@@ -343,7 +427,7 @@ func getPassword(index int) {
 }
 
 func listPasswords() {
-	masterPassword, err := getMasterPassword()
+	masterPassword, err := getMasterPasswordIfNeeded()
 	if err != nil {
 		fmt.Printf("Error reading master password: %v\n", err)
 		return
@@ -373,7 +457,7 @@ func listPasswords() {
 }
 
 func deletePassword(id int) {
-	masterPassword, err := getMasterPassword()
+	masterPassword, err := getMasterPasswordIfNeeded()
 	if err != nil {
 		fmt.Printf("Error reading master password: %v\n", err)
 		return
@@ -420,4 +504,101 @@ func deletePassword(id int) {
 	}
 
 	fmt.Printf("Password with ID %d deleted successfully\n", id)
+}
+
+func unlockStore() {
+	if isUnlocked() {
+		fmt.Println("Password store is already unlocked")
+		printSecurityWarning()
+		return
+	}
+
+	// Verify master password by trying to load the store
+	masterPassword, err := getMasterPassword()
+	if err != nil {
+		fmt.Printf("Error reading master password: %v\n", err)
+		return
+	}
+
+	store, err := loadPasswordStore(masterPassword)
+	if err != nil {
+		fmt.Printf("Error unlocking password store: %v\n", err)
+		return
+	}
+
+	// Store session - we'll store the derived key for the store's salt
+	if len(store.Entries) > 0 {
+		// Derive key using the store's salt
+		sessionKey := deriveKey(masterPassword, store.Salt)
+
+		if err := ensureDataDir(); err != nil {
+			fmt.Printf("Error creating data directory: %v\n", err)
+			return
+		}
+
+		// Write session key to file
+		keyPath := getKeyFilePath()
+		if err := os.WriteFile(keyPath, sessionKey, 0600); err != nil {
+			fmt.Printf("Error saving session key: %v\n", err)
+			return
+		}
+
+		// Create lock file
+		lockPath := getLockFilePath()
+		if err := os.WriteFile(lockPath, []byte("unlocked"), 0600); err != nil {
+			fmt.Printf("Error creating lock file: %v\n", err)
+			return
+		}
+
+		fmt.Println("Password store unlocked successfully")
+		printSecurityWarning()
+	} else {
+		// For empty stores, we still need to create the session
+		sessionKey := deriveKey(masterPassword, store.Salt)
+
+		if err := ensureDataDir(); err != nil {
+			fmt.Printf("Error creating data directory: %v\n", err)
+			return
+		}
+
+		keyPath := getKeyFilePath()
+		if err := os.WriteFile(keyPath, sessionKey, 0600); err != nil {
+			fmt.Printf("Error saving session key: %v\n", err)
+			return
+		}
+
+		lockPath := getLockFilePath()
+		if err := os.WriteFile(lockPath, []byte("unlocked"), 0600); err != nil {
+			fmt.Printf("Error creating lock file: %v\n", err)
+			return
+		}
+
+		fmt.Println("Password store unlocked successfully")
+		printSecurityWarning()
+	}
+}
+
+func lockStore() {
+	if !isUnlocked() {
+		fmt.Println("Password store is already locked")
+		return
+	}
+
+	// Remove lock and key files
+	lockPath := getLockFilePath()
+	keyPath := getKeyFilePath()
+
+	os.Remove(lockPath)
+	os.Remove(keyPath)
+
+	fmt.Println("Password store locked successfully")
+}
+
+func showStatus() {
+	if isUnlocked() {
+		fmt.Println("Password store status: UNLOCKED")
+		printSecurityWarning()
+	} else {
+		fmt.Println("Password store status: LOCKED")
+	}
 }
