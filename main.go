@@ -34,14 +34,21 @@ type PasswordStore struct {
 	Salt    []byte          `json:"salt"`
 }
 
+type Config struct {
+	TimeoutMinutes int `json:"timeout_minutes"`
+}
+
 const (
-	dataFile       = "passwords.dat"
-	lockFile       = ".unlocked"
-	keyFile        = ".session_key"
-	keySize        = 32     // AES-256
-	nonceSize      = 12     // GCM nonce size
-	iterations     = 100000 // PBKDF2 iterations
-	sessionKeySize = 32     // Session key size
+	dataFile          = "passwords.dat"
+	lockFile          = ".unlocked"
+	keyFile           = ".session_key"
+	timeoutFile       = ".session_timeout"
+	configFile        = "config.json"
+	keySize           = 32     // AES-256
+	nonceSize         = 12     // GCM nonce size
+	iterations        = 100000 // PBKDF2 iterations
+	sessionKeySize    = 32     // Session key size
+	defaultTimeoutMin = 30     // Default timeout in minutes
 )
 
 func main() {
@@ -111,6 +118,17 @@ func main() {
 		showStatus()
 	case "change-password":
 		changeMasterPassword()
+	case "set-timeout":
+		if len(os.Args) < 3 {
+			fmt.Println("Usage: cpw set-timeout <minutes>")
+			return
+		}
+		minutes, err := strconv.Atoi(os.Args[2])
+		if err != nil {
+			fmt.Printf("Invalid timeout value: %s\n", os.Args[2])
+			return
+		}
+		setTimeoutMinutes(minutes)
 	default:
 		printUsage()
 	}
@@ -130,6 +148,7 @@ func printUsage() {
 	fmt.Println("  cpw lock                 - Lock the password store")
 	fmt.Println("  cpw status               - Show lock status")
 	fmt.Println("  cpw change-password      - Change the master password")
+	fmt.Println("  cpw set-timeout <minutes> - Set session timeout in minutes")
 }
 
 func getDataFilePath() string {
@@ -165,9 +184,26 @@ func getKeyFilePath() string {
 	return filepath.Join(home, ".cpw", keyFile)
 }
 
+func getTimeoutFilePath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return timeoutFile
+	}
+	return filepath.Join(home, ".cpw", timeoutFile)
+}
+
+func getConfigFilePath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return configFile
+	}
+	return filepath.Join(home, ".cpw", configFile)
+}
+
 func isUnlocked() bool {
 	lockPath := getLockFilePath()
 	keyPath := getKeyFilePath()
+	timeoutPath := getTimeoutFilePath()
 
 	// Both lock file and key file must exist
 	if _, err := os.Stat(lockPath); os.IsNotExist(err) {
@@ -176,11 +212,124 @@ func isUnlocked() bool {
 	if _, err := os.Stat(keyPath); os.IsNotExist(err) {
 		return false
 	}
+
+	// Check timeout if timeout file exists
+	if _, err := os.Stat(timeoutPath); err == nil {
+		if isSessionExpired() {
+			// Session expired, automatically lock
+			fmt.Println("Session timeout expired. Locking password store...")
+			// Directly remove files instead of calling lockStore() to avoid recursion
+			os.Remove(lockPath)
+			os.Remove(keyPath)
+			os.Remove(timeoutPath)
+			return false
+		}
+	}
+
 	return true
 }
 
 func printSecurityWarning() {
 	fmt.Println("\033[33m⚠️  WARNING: Password store is UNLOCKED - remember to run 'cpw lock' when done!\033[0m")
+}
+
+func loadConfig() (*Config, error) {
+	configPath := getConfigFilePath()
+
+	// Create default config if file doesn't exist
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		config := &Config{TimeoutMinutes: defaultTimeoutMin}
+		return config, nil
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, err
+	}
+
+	var config Config
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, err
+	}
+
+	// Validate config
+	if config.TimeoutMinutes <= 0 {
+		config.TimeoutMinutes = defaultTimeoutMin
+	}
+
+	return &config, nil
+}
+
+func saveConfig(config *Config) error {
+	if err := ensureDataDir(); err != nil {
+		return err
+	}
+
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	configPath := getConfigFilePath()
+	return os.WriteFile(configPath, data, 0600)
+}
+
+func recordSessionStart() error {
+	if err := ensureDataDir(); err != nil {
+		return err
+	}
+
+	timeoutPath := getTimeoutFilePath()
+	timestamp := time.Now().Unix()
+	return os.WriteFile(timeoutPath, []byte(fmt.Sprintf("%d", timestamp)), 0600)
+}
+
+func isSessionExpired() bool {
+	timeoutPath := getTimeoutFilePath()
+
+	data, err := os.ReadFile(timeoutPath)
+	if err != nil {
+		// If we can't read the timestamp, consider it expired for security
+		return true
+	}
+
+	startTime, err := strconv.ParseInt(string(data), 10, 64)
+	if err != nil {
+		return true
+	}
+
+	config, err := loadConfig()
+	if err != nil {
+		// If we can't load config, use default timeout
+		config = &Config{TimeoutMinutes: defaultTimeoutMin}
+	}
+
+	elapsed := time.Now().Unix() - startTime
+	timeoutSeconds := int64(config.TimeoutMinutes * 60)
+
+	return elapsed > timeoutSeconds
+}
+
+func setTimeoutMinutes(minutes int) {
+	if minutes <= 0 {
+		fmt.Println("Error: Timeout must be greater than 0 minutes")
+		return
+	}
+
+	// Require authentication to change timeout settings
+	_, err := getMasterPasswordIfNeeded()
+	if err != nil {
+		fmt.Printf("Error reading master password: %v\n", err)
+		return
+	}
+
+	config := &Config{TimeoutMinutes: minutes}
+	if err := saveConfig(config); err != nil {
+		fmt.Printf("Error saving timeout configuration: %v\n", err)
+		return
+	}
+
+	fmt.Printf("Session timeout set to %d minutes\n", minutes)
 }
 
 func getMasterPasswordIfNeeded() ([]byte, error) {
@@ -643,7 +792,18 @@ func unlockStore() {
 			return
 		}
 
+		// Record session start time
+		if err := recordSessionStart(); err != nil {
+			fmt.Printf("Error recording session start: %v\n", err)
+			return
+		}
+
 		fmt.Println("Password store unlocked successfully")
+		config, _ := loadConfig()
+		if config == nil {
+			config = &Config{TimeoutMinutes: defaultTimeoutMin}
+		}
+		fmt.Printf("Session will timeout after %d minutes of inactivity\n", config.TimeoutMinutes)
 		printSecurityWarning()
 	} else {
 		// For empty stores, we still need to create the session
@@ -666,7 +826,18 @@ func unlockStore() {
 			return
 		}
 
+		// Record session start time
+		if err := recordSessionStart(); err != nil {
+			fmt.Printf("Error recording session start: %v\n", err)
+			return
+		}
+
 		fmt.Println("Password store unlocked successfully")
+		config, _ := loadConfig()
+		if config == nil {
+			config = &Config{TimeoutMinutes: defaultTimeoutMin}
+		}
+		fmt.Printf("Session will timeout after %d minutes of inactivity\n", config.TimeoutMinutes)
 		printSecurityWarning()
 	}
 }
@@ -677,12 +848,14 @@ func lockStore() {
 		return
 	}
 
-	// Remove lock and key files
+	// Remove lock, key, and timeout files
 	lockPath := getLockFilePath()
 	keyPath := getKeyFilePath()
+	timeoutPath := getTimeoutFilePath()
 
 	os.Remove(lockPath)
 	os.Remove(keyPath)
+	os.Remove(timeoutPath)
 
 	fmt.Println("Password store locked successfully")
 }
