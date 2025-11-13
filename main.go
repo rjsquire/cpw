@@ -86,6 +86,17 @@ func main() {
 			return
 		}
 		deletePassword(index)
+	case "update":
+		if len(os.Args) < 3 {
+			fmt.Println("Usage: cpw update <index>")
+			return
+		}
+		index, err := strconv.Atoi(os.Args[2])
+		if err != nil {
+			fmt.Printf("Invalid index: %s\n", os.Args[2])
+			return
+		}
+		updatePassword(index)
 	case "unlock":
 		unlockStore()
 	case "lock":
@@ -106,6 +117,7 @@ func printUsage() {
 	fmt.Println("  cpw add <description>     - Add a new password")
 	fmt.Println("  cpw get [index]          - Get password (most recent if no index)")
 	fmt.Println("  cpw list                 - List all passwords")
+	fmt.Println("  cpw update <index>       - Update an existing password")
 	fmt.Println("  cpw delete <index>       - Delete a password")
 	fmt.Println("  cpw unlock               - Unlock the password store")
 	fmt.Println("  cpw lock                 - Lock the password store")
@@ -363,6 +375,77 @@ func addPassword(description string) {
 	}
 
 	fmt.Printf("Password added successfully (ID: %d)\n", nextID)
+}
+
+func updatePassword(id int) {
+	masterPassword, err := getMasterPasswordIfNeeded()
+	if err != nil {
+		fmt.Printf("Error reading master password: %v\n", err)
+		return
+	}
+
+	store, err := loadPasswordStore(masterPassword)
+	if err != nil {
+		fmt.Printf("Error loading password store: %v\n", err)
+		return
+	}
+
+	// Find the entry to update
+	var entryIndex = -1
+	var entry *PasswordEntry
+	for i := range store.Entries {
+		if store.Entries[i].ID == id {
+			entryIndex = i
+			entry = &store.Entries[i]
+			break
+		}
+	}
+
+	if entryIndex == -1 {
+		fmt.Printf("Password with ID %d not found\n", id)
+		return
+	}
+
+	fmt.Printf("Updating password for: %s (ID: %d)\n", entry.Description, entry.ID)
+	fmt.Print("Enter new password: ")
+	password, err := term.ReadPassword(int(syscall.Stdin))
+	fmt.Println()
+	if err != nil {
+		fmt.Printf("Error reading password: %v\n", err)
+		return
+	}
+
+	if len(password) == 0 {
+		fmt.Println("Password cannot be empty")
+		return
+	}
+
+	// Encrypt the new password
+	var key []byte
+	if isUnlocked() {
+		key = masterPassword // masterPassword is already the session key
+	} else {
+		key = deriveKey(masterPassword, store.Salt)
+	}
+
+	encryptedPassword, err := encrypt(string(password), key)
+	if err != nil {
+		fmt.Printf("Error encrypting password: %v\n", err)
+		return
+	}
+
+	// Update the entry
+	store.Entries[entryIndex].Password = base64.StdEncoding.EncodeToString(encryptedPassword)
+
+	if err := savePasswordStore(store); err != nil {
+		fmt.Printf("Error saving password store: %v\n", err)
+		return
+	}
+
+	fmt.Printf("Password updated successfully for '%s' (ID: %d)\n", entry.Description, entry.ID)
+	if isUnlocked() {
+		printSecurityWarning()
+	}
 }
 
 func getPassword(index int) {
