@@ -82,6 +82,14 @@ cpw change-password
 # 3. Confirmation of new password
 ```
 
+### Configure Session Timeout
+```bash
+# Set session timeout in minutes (requires master password if locked)
+cpw set-timeout 60
+# You'll be prompted for master password if store is locked
+# Session will auto-lock after 60 minutes of inactivity
+```
+
 ## How It Works
 
 1. **Master Password**: You set a master password that protects all your stored passwords
@@ -121,6 +129,9 @@ cpw 1         # Shortcut to get password with ID 1
 cpw add "Another Account"
 cpw update 2  # Update Work Email password
 
+# Set custom timeout (optional)
+cpw set-timeout 45  # 45 minutes before auto-lock
+
 # Lock when done for security
 cpw lock
 
@@ -138,7 +149,16 @@ cpw change-password
 - **Locked State** (default): Requires master password for every operation
 - **Unlocked State**: Master password entered once, then cached for subsequent operations
 - **Security Warning**: When unlocked, all commands show a warning reminder to lock the store
-- **Session Management**: Unlock state is maintained until you run `cpw lock` or restart your system
+- **Session Management**: Unlock state is maintained until you run `cpw lock`, restart your system, or session timeout expires
+- **Auto-Timeout**: Configurable automatic locking after inactivity (default: 30 minutes)
+
+## Session Timeout
+
+- **Automatic Security**: Sessions automatically lock after configured timeout period
+- **Configurable Duration**: Set timeout from 1 minute to any desired duration
+- **Inactivity Based**: Timer resets on each command execution
+- **Secure Timestamp**: Session start time securely stored and validated
+- **Graceful Expiry**: Shows timeout message before automatically locking
 
 ## Convenience Features
 
@@ -159,6 +179,7 @@ cpw change-password
 
 - Choose a strong master password - it protects all your other passwords
 - **Always lock the store** when finished - unlocked stores are a security risk
+- **Configuration changes require authentication** - timeout settings require master password when locked
 - The clipboard is cleared automatically after copying (OS dependent)
 - Never share your `passwords.dat` file or master password
 - Regular backups of `passwords.dat` are recommended (the file is encrypted)
