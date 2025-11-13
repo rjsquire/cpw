@@ -36,6 +36,9 @@ cpw get
 
 # Get a specific password by ID
 cpw get 1
+
+# Shortcut: Get password by ID (no 'get' command needed)
+cpw 1
 ```
 
 ### Update a Password
@@ -114,7 +117,7 @@ cpw unlock
 
 # Now use commands without entering master password
 cpw list
-cpw get 1
+cpw 1         # Shortcut to get password with ID 1
 cpw add "Another Account"
 cpw update 2  # Update Work Email password
 
@@ -136,6 +139,13 @@ cpw change-password
 - **Unlocked State**: Master password entered once, then cached for subsequent operations
 - **Security Warning**: When unlocked, all commands show a warning reminder to lock the store
 - **Session Management**: Unlock state is maintained until you run `cpw lock` or restart your system
+
+## Convenience Features
+
+### Integer Shortcut
+- **Quick Access**: Use `cpw 1` instead of `cpw get 1` for faster password retrieval
+- **Same Security**: Shortcut respects lock/unlock state and shows security warnings
+- **Error Handling**: Invalid IDs show the same clear error messages as the full command
 
 ## Change Master Password
 
