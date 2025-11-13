@@ -52,6 +52,12 @@ func main() {
 
 	command := os.Args[1]
 
+	// Check if the command is just a number (shortcut for get)
+	if index, err := strconv.Atoi(command); err == nil {
+		getPassword(index)
+		return
+	}
+
 	switch command {
 	case "add":
 		if len(os.Args) < 3 {
@@ -114,6 +120,7 @@ func printUsage() {
 	fmt.Println("CPW - Clipboard Password Manager")
 	fmt.Println()
 	fmt.Println("Usage:")
+	fmt.Println("  cpw <index>              - Get password by index (shortcut for 'get')")
 	fmt.Println("  cpw add <description>     - Add a new password")
 	fmt.Println("  cpw get [index]          - Get password (most recent if no index)")
 	fmt.Println("  cpw list                 - List all passwords")

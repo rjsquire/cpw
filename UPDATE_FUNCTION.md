@@ -42,3 +42,34 @@ cpw update 1
 - [`term.ReadPassword`](https://pkg.go.dev/golang.org/x/term#ReadPassword) - Hidden password input
 - [`base64.StdEncoding.EncodeToString`](https://pkg.go.dev/encoding/base64#Encoding.EncodeToString) - Base64 encoding
 - [`syscall.Stdin`](https://pkg.go.dev/syscall#pkg-constants) - Standard input file descriptor
+
+---
+
+## Integer Shortcut Feature
+
+**Implementation:** Modified `main()` function to detect integer arguments
+
+**Purpose:** Provides a quick shortcut for retrieving passwords by ID without typing the full `get` command.
+
+**Logic:**
+1. Before processing commands, checks if `os.Args[1]` is a valid integer using `strconv.Atoi()`
+2. If successful, calls `getPassword(index)` directly and returns
+3. If not an integer, proceeds with normal command processing
+
+**Usage Examples:**
+```bash
+# Traditional way
+cpw get 1
+
+# New shortcut way (equivalent)
+cpw 1
+```
+
+**Security:** Maintains all existing security features:
+- Respects lock/unlock state
+- Shows security warnings when unlocked
+- Requires authentication as needed
+- Provides same error messages for invalid IDs
+
+**Libraries Used:**
+- [`strconv.Atoi`](https://pkg.go.dev/strconv#Atoi) - String to integer conversion for shortcut detection
